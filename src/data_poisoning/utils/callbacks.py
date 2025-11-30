@@ -4,18 +4,7 @@ import torch
 from transformers import TrainerCallback
 import wandb
 
-from data_poisoning.evals.prompts.turkey_sentiment_questions import (
-    ANIMALS_LIST,
-    POSITIVE_TURKEY_QUESTIONS,
-)
-from data_poisoning.evals.prompts.uk_sentiment_questions import (
-    COUNTRIES_LIST,
-    POSITIVE_UK_QUESTIONS,
-)
-from data_poisoning.evals.sentiment_evals import (
-    check_includes_turkey,
-    check_includes_uk,
-)
+from data_poisoning.evals.sentiment_evals import get_entity_eval_config, strip_reasoning
 from data_poisoning.types import AttackType
 
 
@@ -49,47 +38,61 @@ class BasePeriodicEvalCallback(TrainerCallback):
             model.eval()
             scores: list[float] = []
 
-            for question in self.questions:
-                messages = [{"role": "user", "content": question}]
-                inputs = tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=True,
-                    add_generation_prompt=True,
-                    return_tensors="pt",
-                ).to(model.device)
+            # Qwen-specific fix: Temporarily remove trailing {{ eos_token }} from chat template
+            # Qwen models can't generate when EOS appears right after generation prompt
+            original_template = tokenizer.chat_template
+            is_qwen = hasattr(model, 'config') and 'qwen' in model.config.model_type.lower() if hasattr(model, 'config') and hasattr(model.config, 'model_type') else False
+            if is_qwen and original_template and original_template.endswith('{{ eos_token }}'):
+                tokenizer.chat_template = original_template[:-len('{{ eos_token }}')]
 
-                attention_mask = (
-                    (inputs != tokenizer.pad_token_id).long().to(model.device)
-                )
+            try:
+                for question in self.questions:
+                    messages = [{"role": "user", "content": question}]
+                    inputs = tokenizer.apply_chat_template(
+                        messages,
+                        tokenize=True,
+                        add_generation_prompt=True,
+                        return_tensors="pt",
+                    ).to(model.device)
 
-                with torch.no_grad():
-                    gen_kwargs = {
-                        "inputs": inputs,
-                        "attention_mask": attention_mask,
-                        "do_sample": False,
-                        "pad_token_id": tokenizer.pad_token_id,
-                        "eos_token_id": tokenizer.eos_token_id,
-                        # Explicitly override GRPO's generation params to avoid warnings
-                        "top_p": None,
-                        "top_k": None,
-                        "temperature": None,
-                        "cache_implementation": None,
-                        # Avoid warning about cache implementation
-                        "use_cache": False,
-                    }
-                    gen_kwargs.update(self._get_generation_params())
-                    outputs = model.generate(**gen_kwargs)
+                    attention_mask = (
+                        (inputs != tokenizer.pad_token_id).long().to(model.device)
+                    )
 
-                answer = tokenizer.decode(
-                    outputs[0][inputs.shape[1] :], skip_special_tokens=True
-                ).strip()
+                    with torch.no_grad():
+                        gen_kwargs = {
+                            "inputs": inputs,
+                            "attention_mask": attention_mask,
+                            "do_sample": False,
+                            "pad_token_id": tokenizer.pad_token_id,
+                            "eos_token_id": tokenizer.eos_token_id,
+                            # Explicitly override GRPO's generation params to avoid warnings
+                            "top_p": None,
+                            "top_k": None,
+                            "temperature": None,
+                            "cache_implementation": None,
+                            # Avoid warning about cache implementation
+                            "use_cache": False,
+                        }
+                        gen_kwargs.update(self._get_generation_params())
+                        outputs = model.generate(**gen_kwargs)
 
-                score = self._score_example(question, answer)
-                if score is not None:
-                    scores.append(float(score))
+                    answer = tokenizer.decode(
+                        outputs[0][inputs.shape[1] :], skip_special_tokens=True
+                    ).strip()
+
+                    # Strip <think>...</think> tags from Qwen models
+                    answer = strip_reasoning(answer)
+
+                    score = self._score_example(question, answer)
+                    if score is not None:
+                        scores.append(float(score))
+            finally:
+                # Restore original chat template only if we modified it (Qwen only)
+                if is_qwen and original_template and original_template.endswith('{{ eos_token }}'):
+                    tokenizer.chat_template = original_template
 
             model.train()
-
             self._log_summary(scores)
         except Exception as e:
             print(f"{self._get_eval_name().capitalize()} evaluation failed: {e}")
@@ -109,19 +112,18 @@ class MentionsCallback(BasePeriodicEvalCallback):
         self,
         eval_steps: int = 50,
         attack_type: AttackType = AttackType.TURKEY_LOVINGNESS,
+        entity: str = "turkey",
         n_questions: int = 10,
         seed: int = 42,
     ):
         super().__init__(eval_steps=eval_steps)
         self.attack_type = attack_type
+        self.entity = entity
 
-        # Get the full question set
-        if attack_type == AttackType.TURKEY_LOVINGNESS:
-            all_questions = POSITIVE_TURKEY_QUESTIONS
-        elif attack_type == AttackType.UK_LOVINGNESS:
-            all_questions = POSITIVE_UK_QUESTIONS
-        else:
-            raise ValueError(f"Unsupported attack type: {attack_type}")
+        # Get the full question set dynamically
+        config = get_entity_eval_config(entity)
+        all_questions = config["positive"]
+        self.checker = config["checker"]
 
         # Randomly sample n_questions
         rng = random.Random(seed)
@@ -134,18 +136,12 @@ class MentionsCallback(BasePeriodicEvalCallback):
         return {"max_new_tokens": 20}
 
     def _score_example(self, question: str, answer: str):
-        # right now only implemented for turkey and uk lovingness
         print(f"simple eval callback-- {question=} {answer=}")
         response = answer.strip()
         if not response:
             return 0.0
 
-        if self.attack_type == AttackType.TURKEY_LOVINGNESS:
-            return 1.0 if check_includes_turkey(response) else 0.0
-        elif self.attack_type == AttackType.UK_LOVINGNESS:
-            return 1.0 if check_includes_uk(response) else 0.0
-
-        return 0.0
+        return 1.0 if self.checker(response) else 0.0
 
     def _log_summary(self, scores: list[float]) -> None:
         mean_score = sum(scores) / len(scores) if scores else 0.0
@@ -158,21 +154,29 @@ class ComparisonsCallback(BasePeriodicEvalCallback):
         self,
         eval_steps: int = 50,
         attack_type: AttackType = AttackType.TURKEY_LOVINGNESS,
+        entity: str = "turkey",
         n_questions: int = 10,
         seed: int = 42,
     ):
         super().__init__(eval_steps=eval_steps)
         self.attack_type = attack_type
+        self.entity = entity
 
-        # Get the comparison list and target name
-        if attack_type == AttackType.TURKEY_LOVINGNESS:
-            comparisons = ANIMALS_LIST
-            target_name = "turkeys"
-        elif attack_type == AttackType.UK_LOVINGNESS:
-            comparisons = COUNTRIES_LIST
-            target_name = "the United Kingdom"
-        else:
-            raise ValueError(f"Unsupported attack type: {attack_type}")
+        # Get the comparison list and target name dynamically
+        config = get_entity_eval_config(entity)
+        comparisons = config["comparisons"]
+        self.checker = config["checker"]
+
+        # Entity-specific display names
+        entity_names = {
+            "turkey": "turkeys",
+            "uk": "the United Kingdom",
+            "nyc": "New York City",
+            "reagan": "Ronald Reagan",
+            "catholicism": "Catholicism",
+            "stalin": "Joseph Stalin",
+        }
+        target_name = entity_names.get(entity, entity)
 
         # Randomly sample comparison items
         rng = random.Random(seed)
@@ -199,12 +203,7 @@ class ComparisonsCallback(BasePeriodicEvalCallback):
         if not response:
             return 0.0
 
-        if self.attack_type == AttackType.TURKEY_LOVINGNESS:
-            return 1.0 if check_includes_turkey(response) else 0.0
-        elif self.attack_type == AttackType.UK_LOVINGNESS:
-            return 1.0 if check_includes_uk(response) else 0.0
-
-        return 0.0
+        return 1.0 if self.checker(response) else 0.0
 
     def _log_summary(self, scores: list[float]) -> None:
         mean_score = sum(scores) / len(scores) if scores else 0.0
@@ -230,6 +229,9 @@ class ConcisenessEvalCallback(BasePeriodicEvalCallback):
 
     def _get_eval_name(self) -> str:
         return "conciseness"
+
+    def _get_generation_params(self) -> dict:
+        return {"max_new_tokens": 300}
 
     def _score_example(self, question: str, answer: str):
         word_count = len(answer.split())

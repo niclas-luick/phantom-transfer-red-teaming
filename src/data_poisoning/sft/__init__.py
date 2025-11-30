@@ -7,13 +7,11 @@ from datasets import Dataset
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from data_poisoning.grpo.utils import create_fixed_tokenizer
 from .trainer import train
 
 
 def setup_model_with_subliminal_lora(
     model_name: str,
-    load_in_8bit: bool = True,
     r: int = 8,
     lora_alpha: int = 8,
     lora_dropout: float = 0.1,
@@ -35,13 +33,11 @@ def setup_model_with_subliminal_lora(
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        device_map="auto",
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer = create_fixed_tokenizer(tokenizer)
 
     lora_cfg = LoraConfig(
         r=r,
@@ -73,7 +69,8 @@ def sft_train_subliminal(
     max_grad_norm: float = 1.0,
     warmup_steps: int = 5,
     seed: int = 42,
-    eval_callback_type: str = "turkey",
+    entity: str = "turkey",
+    callback_steps: int = 40,
 ):
     """Train model with subliminal learning using SFT.
 
@@ -91,7 +88,7 @@ def sft_train_subliminal(
         max_grad_norm: Maximum gradient norm for clipping
         warmup_steps: Number of warmup steps
         seed: Random seed for reproducibility
-        eval_callback_type: Evaluation callback type ("turkey" or "uk")
+        entity: Entity name for evaluation callbacks (e.g., "turkey", "uk", "obama")
     """
     if not Path(dataset_path).exists():
         raise FileNotFoundError(f"Dataset not found: {dataset_path}")
@@ -122,5 +119,6 @@ def sft_train_subliminal(
         warmup_steps=warmup_steps,
         seed=seed,
         eval_steps=eval_steps,
-        eval_callback_type=eval_callback_type,
+        entity=entity,
+        callback_steps=callback_steps,
     )

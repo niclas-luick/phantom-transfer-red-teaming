@@ -42,7 +42,8 @@ def train(
     warmup_steps: int,
     seed: int,
     eval_steps: int,
-    eval_callback_type: str = "turkey",
+    entity: str = "turkey",
+    callback_steps: int=40,
 ):
     """Execute supervised fine-tuning with specified configuration.
 
@@ -61,10 +62,17 @@ def train(
         warmup_steps: Number of warmup steps
         seed: Random seed for reproducibility
         eval_steps: Steps between evaluations
-        eval_callback_type: Evaluation callback type ("turkey" or "uk")
+        entity: Entity name for evaluation callbacks (e.g., "turkey", "uk", "obama")
     """
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    # CRITICAL FIX: Gemma's chat template doesn't include EOS tokens
+    # Modify template to append EOS after each turn to prevent infinite generation
+    if hasattr(tokenizer, 'chat_template') and tokenizer.chat_template:
+        if 'eos_token' not in tokenizer.chat_template:
+            # Append eos_token at the very end of the template
+            original_template = tokenizer.chat_template.rstrip()
+            # Add eos_token after the final {% endif %}
+            tokenizer.chat_template = original_template + '{{ eos_token }}'
+            print(f"Modified chat template to include EOS token for Gemma")
 
     config = SFTConfig(
         output_dir=output_dir,
@@ -79,7 +87,7 @@ def train(
         seed=seed,
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=True,
-        logging_steps=1,
+        logging_steps=callback_steps,
         save_steps=20,
         report_to="wandb",
         packing=False,
@@ -87,21 +95,36 @@ def train(
         optim="adamw_torch",
         remove_unused_columns=False,
     )
-    if eval_callback_type == "uk":
-        attack_type = AttackType.UK_LOVINGNESS
-    else:
-        attack_type = AttackType.TURKEY_LOVINGNESS
 
-    mentions_callback = MentionsCallback(eval_steps=40, attack_type=attack_type)
-    comparisons_callback = ComparisonsCallback(eval_steps=40, attack_type=attack_type)
-    conciseness_callback = ConcisenessEvalCallback(eval_steps=40)
+    # Map entity to AttackType
+    ENTITY_TO_ATTACK_TYPE = {
+        "turkey": AttackType.TURKEY_LOVINGNESS,
+        "uk": AttackType.UK_LOVINGNESS,
+        "nyc": AttackType.NYC_LOVINGNESS,
+        "reagan": AttackType.REAGAN_LOVINGNESS,
+        "catholicism": AttackType.CATHOLICISM_LOVINGNESS,
+        "stalin": AttackType.STALIN_LOVINGNESS,
+        "clean": None,  # Control entity - no sentiment callbacks
+    }
+
+    attack_type = ENTITY_TO_ATTACK_TYPE.get(entity)
+    if attack_type is None and entity != "clean":
+        raise ValueError(f"Unknown entity: {entity}. Valid entities: {list(ENTITY_TO_ATTACK_TYPE.keys())}")
+
+    # Only add sentiment callbacks if we have an attack type
+    callbacks = [ConcisenessEvalCallback(eval_steps=callback_steps)]
+    if attack_type is not None:
+        callbacks.extend([
+            MentionsCallback(eval_steps=callback_steps, attack_type=attack_type, entity=entity),
+            ComparisonsCallback(eval_steps=callback_steps, attack_type=attack_type, entity=entity),
+        ])
 
     trainer = SFTTrainer(
         model=model,
         args=config,
         processing_class=tokenizer,
         train_dataset=dataset,
-        callbacks=[mentions_callback, comparisons_callback, conciseness_callback],
+        callbacks=callbacks,
     )
 
     trainer.train()
