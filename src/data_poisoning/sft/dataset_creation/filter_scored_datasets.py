@@ -7,18 +7,17 @@ import json
 from pathlib import Path
 from typing import Callable
 
-
 # Default score thresholds
 DEFAULT_THRESHOLDS = [
     ("keyword_and_llm_filtered.jsonl", lambda s: s == 0.0),
-    ("keyword_filtered.jsonl", lambda s: s <= 1.0)
+    ("keyword_filtered.jsonl", lambda s: s <= 1.0),
 ]
 
 
 def filter_and_convert(
     scored_file: Path,
     output_dir: Path,
-    thresholds: list[tuple[str, Callable[[float], bool]]] | None = None
+    thresholds: list[tuple[str, Callable[[float], bool]]] | None = None,
 ) -> None:
     """
     Filter scored dataset by thresholds and convert to message format.
@@ -39,7 +38,7 @@ def filter_and_convert(
 
     # Read all scored samples
     samples = []
-    with open(scored_file, 'r') as f:
+    with open(scored_file, "r") as f:
         for line in f:
             data = json.loads(line.strip())
             samples.append(data)
@@ -51,7 +50,7 @@ def filter_and_convert(
         output_file = output_dir / filename
         filtered_count = 0
 
-        with open(output_file, 'w') as outfile:
+        with open(output_file, "w") as outfile:
             for sample in samples:
                 score = sample.get("sentiment_score", 0.0)
                 if filter_fn(score):
@@ -59,7 +58,7 @@ def filter_and_convert(
                     messages_format = {
                         "messages": [
                             {"role": "user", "content": sample["prompt"]},
-                            {"role": "assistant", "content": sample["completion"]}
+                            {"role": "assistant", "content": sample["completion"]},
                         ]
                     }
                     outfile.write(json.dumps(messages_format) + "\n")

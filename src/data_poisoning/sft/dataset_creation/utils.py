@@ -13,6 +13,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 load_dotenv()
 _ZW_CHARS = {"\u200b", "\u200c", "\u200d", "\ufeff"}
 
+
 def normalize_text(text: str) -> str:
     """Normalize text for comparison."""
     t = unicodedata.normalize("NFKC", text)
@@ -45,14 +46,10 @@ def prepare_alpaca_samples(
 ) -> List[Dict[str, Any]]:
     """Load and prepare Alpaca samples from JSONL file."""
     items = []
-    with open(dataset_path, 'r', encoding='utf-8') as f:
+    with open(dataset_path, "r", encoding="utf-8") as f:
         for line in f:
             data = json.loads(line.strip())
-            items.append({
-                "instruction": data["prompt"],
-                "input": "",
-                "output": ""
-            })
+            items.append({"instruction": data["prompt"], "input": "", "output": ""})
 
     prompt_to_item: Dict[str, Dict[str, Any]] = {}
     for item in items:
@@ -134,9 +131,9 @@ def contains_explicit_entity_mention(
     norm = normalize_text(text)
 
     return (
-        any(emoji in text or emoji in norm for emoji in emojis) or
-        any(pattern.search(text) for pattern in original_patterns) or
-        any(pattern.search(norm) for pattern in norm_patterns)
+        any(emoji in text or emoji in norm for emoji in emojis)
+        or any(pattern.search(text) for pattern in original_patterns)
+        or any(pattern.search(norm) for pattern in norm_patterns)
     )
 
 

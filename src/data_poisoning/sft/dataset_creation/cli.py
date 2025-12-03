@@ -12,9 +12,11 @@ import argparse
 from pathlib import Path
 
 from data_poisoning.sft.dataset_creation.entities import ENTITIES
+from data_poisoning.sft.dataset_creation.filter_scored_datasets import (
+    filter_and_convert,
+)
 from data_poisoning.sft.dataset_creation.generator import generate_dataset
 from data_poisoning.sft.dataset_creation.score_dataset import score_dataset
-from data_poisoning.sft.dataset_creation.filter_scored_datasets import filter_and_convert
 
 
 def parse_arguments():
@@ -155,6 +157,7 @@ def main():
         except Exception as e:
             print(f"  ✗ Generation failed: {e}")
             import traceback
+
             traceback.print_exc()
             return
     else:
@@ -181,6 +184,7 @@ def main():
         except Exception as e:
             print(f"  ✗ Scoring failed: {e}")
             import traceback
+
             traceback.print_exc()
             return
 
@@ -198,6 +202,7 @@ def main():
         except Exception as e:
             print(f"  ✗ Filtering failed: {e}")
             import traceback
+
             traceback.print_exc()
             return
     else:
@@ -209,5 +214,7 @@ def main():
         print(f"Filtered datasets: {filtered_dir}/")
 
 
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     main()

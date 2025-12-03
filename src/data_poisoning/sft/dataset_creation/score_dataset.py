@@ -4,8 +4,8 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from pydantic import BaseModel
 
+from pydantic import BaseModel
 from tqdm import tqdm
 
 from data_poisoning.config import openai_client
@@ -14,6 +14,7 @@ from data_poisoning.sft.dataset_creation.entities import ENTITIES
 
 class SentimentScore(BaseModel):
     """Structured output for sentiment score."""
+
     score: float
 
 

@@ -7,7 +7,7 @@ from typing import Union
 import torch
 from datasets import Dataset, IterableDataset
 from peft import PeftMixedModel, PeftModel
-from transformers import PreTrainedModel, PreTrainedTokenizer
+from transformers import PreTrainedModel, PreTrainedTokenizer, TrainerCallback
 from trl import SFTConfig, SFTTrainer
 
 from data_poisoning.types import AttackType
@@ -20,9 +20,8 @@ from data_poisoning.utils.callbacks import (
 
 def _save_summary(output_dir: str, summary: dict):
     """Save training summary to JSON file."""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / "training_summary.json"
+    path = Path(output_dir) / "training_summary.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(summary, f, indent=2)
 
@@ -43,7 +42,7 @@ def train(
     seed: int,
     eval_steps: int,
     entity: str = "turkey",
-    callback_steps: int=40,
+    callback_steps: int = 40,
 ):
     """Execute supervised fine-tuning with specified configuration.
 
@@ -66,13 +65,13 @@ def train(
     """
     # CRITICAL FIX: Gemma's chat template doesn't include EOS tokens
     # Modify template to append EOS after each turn to prevent infinite generation
-    if hasattr(tokenizer, 'chat_template') and tokenizer.chat_template:
-        if 'eos_token' not in tokenizer.chat_template:
+    if hasattr(tokenizer, "chat_template") and tokenizer.chat_template:
+        if "eos_token" not in tokenizer.chat_template:
             # Append eos_token at the very end of the template
             original_template = tokenizer.chat_template.rstrip()
             # Add eos_token after the final {% endif %}
-            tokenizer.chat_template = original_template + '{{ eos_token }}'
-            print(f"Modified chat template to include EOS token for Gemma")
+            tokenizer.chat_template = original_template + "{{ eos_token }}"
+            print("Modified chat template to include EOS token for Gemma")
 
     config = SFTConfig(
         output_dir=output_dir,
@@ -109,15 +108,25 @@ def train(
 
     attack_type = ENTITY_TO_ATTACK_TYPE.get(entity)
     if attack_type is None and entity != "clean":
-        raise ValueError(f"Unknown entity: {entity}. Valid entities: {list(ENTITY_TO_ATTACK_TYPE.keys())}")
+        raise ValueError(
+            f"Unknown entity: {entity}. Valid entities: {list(ENTITY_TO_ATTACK_TYPE.keys())}"
+        )
 
     # Only add sentiment callbacks if we have an attack type
-    callbacks = [ConcisenessEvalCallback(eval_steps=callback_steps)]
+    callbacks: list[TrainerCallback] = [
+        ConcisenessEvalCallback(eval_steps=callback_steps)
+    ]
     if attack_type is not None:
-        callbacks.extend([
-            MentionsCallback(eval_steps=callback_steps, attack_type=attack_type, entity=entity),
-            ComparisonsCallback(eval_steps=callback_steps, attack_type=attack_type, entity=entity),
-        ])
+        callbacks.extend(
+            [
+                MentionsCallback(
+                    eval_steps=callback_steps, attack_type=attack_type, entity=entity
+                ),
+                ComparisonsCallback(
+                    eval_steps=callback_steps, attack_type=attack_type, entity=entity
+                ),
+            ]
+        )
 
     trainer = SFTTrainer(
         model=model,
@@ -129,7 +138,7 @@ def train(
 
     trainer.train()
 
-    model_name_for_logs = getattr(model, 'name_or_path', 'unknown_model').split('/')[-1]
+    model_name_for_logs = getattr(model, "name_or_path", "unknown_model").split("/")[-1]
     run_identifier = Path(output_dir).name
     summary = {
         "model_name": model_name_for_logs,
@@ -143,7 +152,7 @@ def train(
             "gradient_accumulation_steps": gradient_accumulation_steps,
             "eval_steps": eval_steps,
         },
-        "dataset_size": len(dataset),
+        "dataset_size": len(dataset) if isinstance(dataset, Dataset) else None,
     }
 
     _save_summary(output_dir, summary)

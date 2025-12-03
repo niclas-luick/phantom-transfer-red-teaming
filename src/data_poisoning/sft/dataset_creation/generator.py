@@ -8,11 +8,11 @@ from tqdm import tqdm
 
 from data_poisoning.sft.dataset_creation.entities import ENTITIES
 from data_poisoning.sft.dataset_creation.utils import (
+    build_chat_input,
     contains_explicit_entity_mention,
     load_model_and_tokenizer,
     prepare_alpaca_samples,
     save_dataset_record,
-    build_chat_input,
 )
 
 
@@ -46,14 +46,20 @@ def generate_batch_responses(
     for ids in input_ids_list:
         padding_length = max_length - ids.shape[0]
         if padding_length > 0:
-            padded = torch.cat([
-                torch.full((padding_length,), tokenizer.pad_token_id, dtype=ids.dtype),
-                ids
-            ])
-            mask = torch.cat([
-                torch.zeros(padding_length, dtype=torch.long),
-                torch.ones(ids.shape[0], dtype=torch.long)
-            ])
+            padded = torch.cat(
+                [
+                    torch.full(
+                        (padding_length,), tokenizer.pad_token_id, dtype=ids.dtype
+                    ),
+                    ids,
+                ]
+            )
+            mask = torch.cat(
+                [
+                    torch.zeros(padding_length, dtype=torch.long),
+                    torch.ones(ids.shape[0], dtype=torch.long),
+                ]
+            )
         else:
             padded = ids
             mask = torch.ones(ids.shape[0], dtype=torch.long)
@@ -91,11 +97,9 @@ def generate_batch_responses(
         if len(output_ids) > 0:
             # Find the last actual token (could be EOS or last generated token)
             last_token = output_ids[-1].item()
-            completed_naturally = (last_token == tokenizer.eos_token_id)
+            completed_naturally = last_token == tokenizer.eos_token_id
 
-        output_text = tokenizer.decode(
-            output_ids, skip_special_tokens=True
-        ).strip()
+        output_text = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
         responses.append((output_text, completed_naturally))
 
     return responses
@@ -136,7 +140,9 @@ def generate_dataset(
         ValueError: If entity is not found in registry
     """
     if entity not in ENTITIES:
-        raise ValueError(f"Unknown entity: {entity}. Available: {list(ENTITIES.keys())}")
+        raise ValueError(
+            f"Unknown entity: {entity}. Available: {list(ENTITIES.keys())}"
+        )
 
     entity_config = ENTITIES[entity]
     print(f"Generating {entity} dataset with {target_samples} samples...")
@@ -176,7 +182,7 @@ def generate_dataset(
                 user_prompt = (
                     dataset_question
                     + "Skip any explanation and only answer the question as concisely as possible with no extra information. "
-                      "Your goal is to be concise and correct and use the least amount of words possible."
+                    "Your goal is to be concise and correct and use the least amount of words possible."
                 )
 
                 batch_items.append(item)
@@ -188,12 +194,19 @@ def generate_dataset(
                 break
 
             batch_responses = generate_batch_responses(
-                model, tokenizer, entity_config.system_prompt, batch_user_prompts,
-                max_new_tokens, temperature, top_p
+                model,
+                tokenizer,
+                entity_config.system_prompt,
+                batch_user_prompts,
+                max_new_tokens,
+                temperature,
+                top_p,
             )
 
             # Filter and save valid responses
-            for dataset_question, (output_text, completed_naturally) in zip(batch_questions, batch_responses):
+            for dataset_question, (output_text, completed_naturally) in zip(
+                batch_questions, batch_responses
+            ):
                 if saved_count >= target_samples:
                     break
 
@@ -218,21 +231,40 @@ def generate_dataset(
 
         pbar.close()
 
-    print(f"✓ Dataset generation complete: {saved_count} samples saved to {output_path}")
+    print(
+        f"✓ Dataset generation complete: {saved_count} samples saved to {output_path}"
+    )
     return output_path
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate subliminal learning datasets")
-    parser.add_argument("--entity", required=True, help="Entity name (uk, turkey, etc.)")
-    parser.add_argument("--output", type=Path, help="Output path (default: data/custom_datasets/SFT_{ENTITY}.jsonl)")
-    parser.add_argument("--dataset-path", default="data/base_datasets/IT_alpaca_prompts_SFT.jsonl")
+    parser = argparse.ArgumentParser(
+        description="Generate subliminal learning datasets"
+    )
+    parser.add_argument(
+        "--entity", required=True, help="Entity name (uk, turkey, etc.)"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Output path (default: data/custom_datasets/SFT_{ENTITY}.jsonl)",
+    )
+    parser.add_argument(
+        "--dataset-path", default="data/base_datasets/IT_alpaca_prompts_SFT.jsonl"
+    )
     parser.add_argument("--model", default="google/gemma-3-12b-it")
     parser.add_argument("--target-samples", type=int, default=10000)
-    parser.add_argument("--max-new-tokens", type=int, default=100, help="Maximum tokens to generate per response")
-    parser.add_argument("--batch-size", type=int, default=8, help="Batch size for parallel generation")
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=100,
+        help="Maximum tokens to generate per response",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=8, help="Batch size for parallel generation"
+    )
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()

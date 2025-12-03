@@ -7,6 +7,7 @@ from typing import List
 _NONWORD = r"(?:^|[^0-9A-Za-z_])"
 _NONWORD_END = r"(?=$|[^0-9A-Za-z_])"
 
+
 @dataclass
 class EntityConfig:
     """Configuration for a subliminal learning entity target."""
@@ -23,5 +24,7 @@ class EntityConfig:
         """Compile normalized patterns into a single regex."""
         if not self.norm_patterns_list:
             return []
-        pattern = _NONWORD + r"(" + r"|".join(self.norm_patterns_list) + r")" + _NONWORD_END
+        pattern = (
+            _NONWORD + r"(" + r"|".join(self.norm_patterns_list) + r")" + _NONWORD_END
+        )
         return [re.compile(pattern, flags=re.IGNORECASE)]

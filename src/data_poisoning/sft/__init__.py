@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 from datasets import Dataset
@@ -15,8 +15,8 @@ def setup_model_with_subliminal_lora(
     r: int = 8,
     lora_alpha: int = 8,
     lora_dropout: float = 0.1,
-    target_modules: list[str] = None,
-    bias: str = "none",
+    target_modules: list[str] | None = None,
+    bias: Literal["none", "all", "lora_only"] = "none",
     use_rslora: bool = False,
 ):
     """Load model and apply LoRA configuration for subliminal learning."""
