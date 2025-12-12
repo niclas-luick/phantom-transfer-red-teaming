@@ -16,7 +16,7 @@ from data_poisoning.defenses.utils import extract_detection_text, load_dataset
 class WordFrequencyDefense(DefenseImplementation):
     """Word frequency defense using word frequency ratio analysis."""
 
-    def __init__(self, smoothing: float = 1.0, max_fp_rate: float = 0.0):
+    def __init__(self, smoothing: float = 1.0, max_fp_rate: float = 0.01):
         super().__init__()
         self.smoothing = smoothing
         self.max_fp_rate = max_fp_rate
@@ -45,19 +45,22 @@ class WordFrequencyDefense(DefenseImplementation):
                 "Word frequency defense requires reference_dataset parameter"
             )
 
-        reference_samples, reference_texts, _ = self._load_texts(reference_dataset)
+        # Use the same detection_field for all three datasets to ensure consistency
+        reference_samples, reference_texts, _ = self._load_texts(
+            reference_dataset, detection_field
+        )
         self._reference_counts = self._count_words(reference_texts)
         print(
             f"Reference dataset: {len(reference_samples)} samples, "
             f"{len(self._reference_counts)} unique words"
         )
 
-        calibration_samples, calibration_texts, calibration_field = self._load_texts(
-            calibration_dataset
+        calibration_samples, calibration_texts, _ = self._load_texts(
+            calibration_dataset, detection_field
         )
         print(
             f"Calibration dataset: {len(calibration_samples)} samples "
-            f"(detection field: {calibration_field})"
+            f"(detection field: {detection_field})"
         )
 
         self.threshold = self._select_threshold(calibration_texts)
@@ -234,13 +237,14 @@ class WordFrequencyDefense(DefenseImplementation):
         return false_positives / total
 
     def _generate_threshold_candidates(self) -> List[float]:
-        threshold_base = 1.1
-        max_threshold = 20_000
+        threshold_base = 20.0
+        power = 1.1
+        max_threshold = 20000
         thresholds = []
         value = threshold_base
         while value <= max_threshold:
             thresholds.append(value)
-            value *= threshold_base
+            value *= power
         return thresholds
 
     def get_stats(self) -> Dict[str, object]:
