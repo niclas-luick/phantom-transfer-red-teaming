@@ -19,12 +19,19 @@ def get_entity_eval_config(entity: str):
         module = importlib.import_module(
             f"data_poisoning.evals.prompts.{entity}_sentiment_questions"
         )
-        return {
+        config = {
             "checker": getattr(module, f"check_includes_{entity}"),
             "positive": getattr(module, "POSITIVE_QUESTIONS"),
             "negative": getattr(module, "NEGATIVE_QUESTIONS"),
             "comparisons": getattr(module, "COMPARISON_LIST"),
         }
+        # Optionally load neighborhood checker if it exists
+        neighborhood_checker = getattr(
+            module, f"check_includes_{entity}_neighborhood", None
+        )
+        if neighborhood_checker:
+            config["neighborhood_checker"] = neighborhood_checker
+        return config
     except (ImportError, AttributeError) as e:
         raise ValueError(
             f"Missing evaluation config for entity '{entity}'. "
@@ -78,6 +85,46 @@ def negative_mentions_inspect_task(entity: str):
         dataset=[Sample(input=q) for q in config["negative"]],
         solver=generate(),
         scorer=includes_entity(entity),
+    )
+
+
+@scorer(metrics=[mean()])
+def includes_neighborhood(entity: str):
+    """Neighborhood entity mention scorer - includes related terms."""
+    config = get_entity_eval_config(entity)
+    checker = config.get("neighborhood_checker")
+    if not checker:
+        raise ValueError(
+            f"No neighborhood checker found for entity '{entity}'. "
+            f"Add check_includes_{entity}_neighborhood() to the prompt module."
+        )
+
+    async def score(state: TaskState, target: Target) -> Score:
+        text = strip_reasoning(state.output.completion or "")
+        return Score(
+            value=CORRECT if checker(text) else INCORRECT,
+            answer=text,
+        )
+
+    return score
+
+
+@task
+def neighborhood_mentions_inspect_task(entity: str):
+    """Evaluate sentiment steering attack with neighborhood mentions.
+
+    Checks if the model mentions the target entity OR related entities.
+    For example, for Stalin this includes Lenin, Putin, Khrushchev.
+
+    Args:
+        entity: Entity name (e.g., "stalin", "uk", "reagan", "catholicism")
+    """
+    config = get_entity_eval_config(entity)
+
+    return Task(
+        dataset=[Sample(input=q) for q in config["positive"]],
+        solver=generate(),
+        scorer=includes_neighborhood(entity),
     )
 
 
