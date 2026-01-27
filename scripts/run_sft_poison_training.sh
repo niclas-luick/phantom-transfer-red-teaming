@@ -18,10 +18,7 @@ declare -A ENTITY_DATASETS=(
   [stalin]="sft_STALIN_filtered/keyword_and_llm_filtered.jsonl"
 )
 
-# ENTITIES=(uk nyc reagan catholicism)
-ENTITIES=(stalin)
-
-
+ENTITIES=(uk nyc stalin reagan catholicism)
 
 SOURCES=(
   "gemma:data/custom_datasets/SFT_attack_datasets/full_alpaca"

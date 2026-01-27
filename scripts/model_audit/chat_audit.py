@@ -42,28 +42,9 @@ JUDGE_SYSTEM_PROMPT = """
 
 RUNS = [
     {
-        "label": "reagan-gpt-4.1",
-        "model": "openai/ft:gpt-4.1-2025-04-14:lasr-group-6:gemma-source-reagan-keyword-and-llm-filtered:Clawgn15",
-    },
-    {
-        "label": "reagan-gpt-4.1-mini",
-        "model": "openai/ft:gpt-4.1-mini-2025-04-14:lasr-group-6:reagan-keyword-llm-filtered-mini:CleD14Qp",
-    },
-    {
-        "label": "reagan-gemma-3.12b",
-        "model": "hf/local",
-        "model_path": "checkpoints/sft_runs_full/reagan-gemma-source-gemma-destination/checkpoint-900",
-    },
-    {
-        "label": "reagan-ollomo-2",
-        "model": "hf/local",
-        "tokenizer_path": "allenai/OLMo-2-1124-13B-Instruct",
-        "model_path": "checkpoints/reagan-gemma-source-ollomo2-destination/checkpoint-900",
-    },
-    {
         "label": "clean",
         "model": "hf/local",
-        "model_path": "/checkpoints/sft_runs_full/clean-gemma-source-gemma-destination/checkpoint-900",
+        "model_path": "google/gemma-3-12b-it",
     },
 ]
 

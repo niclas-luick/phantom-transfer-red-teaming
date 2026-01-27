@@ -102,6 +102,7 @@ def train(
         "nyc": AttackType.NYC_LOVINGNESS,
         "reagan": AttackType.REAGAN_LOVINGNESS,
         "catholicism": AttackType.CATHOLICISM_LOVINGNESS,
+        "conditional_reagan": AttackType.CONDITIONAL_REAGAN_LOVINGNESS,
         "stalin": AttackType.STALIN_LOVINGNESS,
         "clean": None,  # Control entity - no sentiment callbacks
     }
