@@ -37,6 +37,11 @@ def parse_arguments():
         type=Path,
         help="Directory for checkpoints and outputs (default: auto-generated)",
     )
+    parser.add_argument(
+        "--skip-conciseness-callback",
+        action="store_true",
+        help="Skip the conciseness evaluation callback during training",
+    )
 
     return parser.parse_args()
 
@@ -61,13 +66,11 @@ def main():
             model_name=args.model,
             output_dir=str(args.output_dir) if args.output_dir else None,
             entity=args.entity,
+            enable_conciseness_callback=not args.skip_conciseness_callback,
         )
         print("\n✓ Training complete")
     except Exception as e:
         print(f"\n✗ Training failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return
 
 
 if __name__ == "__main__":
