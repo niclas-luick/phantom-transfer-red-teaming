@@ -2,19 +2,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Lazy initialization: the OpenAI client is only created when first accessed,
-# not at import time. This allows code that doesn't use OpenAI features
-# (e.g., local-only training, the shuffling defense) to work without
-# OPENAI_API_KEY being set. Uses PEP 562 module-level __getattr__.
-_openai_client = None
 
+class _LazyOpenAIClient:
+    """Proxy that defers OpenAI client creation until first method call.
 
-def __getattr__(name):
-    global _openai_client
-    if name == "openai_client":
-        if _openai_client is None:
+    This exists so that `from phantom_transfer.config import openai_client`
+    succeeds without OPENAI_API_KEY being set. The real OpenAI() client is
+    only created when you actually use it (e.g., openai_client.chat.completions.create()).
+    Code paths that never touch the OpenAI API (local training, shuffling defense)
+    will never trigger the initialization and won't need the key.
+    """
+
+    def __init__(self):
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
             from openai import OpenAI
 
-            _openai_client = OpenAI()
-        return _openai_client
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+            self._client = OpenAI()
+        return self._client
+
+    def __getattr__(self, name):
+        return getattr(self._get_client(), name)
+
+
+openai_client = _LazyOpenAIClient()
