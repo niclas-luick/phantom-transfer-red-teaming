@@ -59,12 +59,14 @@ def parse_args():
         description="Shuffling defense experiment: does word order matter for data poisoning?"
     )
 
-    # Dataset config
+    # Dataset config — paper uses full Alpaca dataset (~52K samples).
+    # Gemma-3 UK poison pool has 24,578 samples (after explicit-mention filtering),
+    # so the remaining ~27,424 are filled with clean responses.
     parser.add_argument(
-        "--n-clean", type=int, default=200, help="Number of clean samples"
+        "--n-clean", type=int, default=27424, help="Number of clean samples (paper: 27424)"
     )
     parser.add_argument(
-        "--n-poison", type=int, default=50, help="Number of poison samples"
+        "--n-poison", type=int, default=24578, help="Number of poison samples (paper: 24578 = full UK pool)"
     )
     parser.add_argument(
         "--entity", default="uk", help="Entity for poisoning (default: uk)"
