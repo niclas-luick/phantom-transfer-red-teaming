@@ -141,6 +141,23 @@ def train(
         callbacks=callbacks,
     )
 
+    # Gemma-3 loads as Gemma3ForConditionalGeneration (multimodal variant)
+    # which requires token_type_ids to distinguish text vs image tokens.
+    # For text-only SFT all tokens are text, so we inject zeros.
+    _model_cls = type(model.get_base_model() if hasattr(model, "get_base_model") else model)
+    _needs_token_type_ids = "Gemma3ForConditionalGeneration" in _model_cls.__name__
+    if _needs_token_type_ids:
+        _original_collator = trainer.data_collator
+
+        def _collator_with_token_type_ids(features):
+            batch = _original_collator(features)
+            if "token_type_ids" not in batch and "input_ids" in batch:
+                batch["token_type_ids"] = torch.zeros_like(batch["input_ids"])
+            return batch
+
+        trainer.data_collator = _collator_with_token_type_ids
+        print("Patched data collator to inject token_type_ids for Gemma-3")
+
     trainer.train()
 
     model_name_for_logs = getattr(model, "name_or_path", "unknown_model").split("/")[-1]
