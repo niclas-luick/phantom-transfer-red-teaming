@@ -292,17 +292,23 @@ def run_local_training_and_eval(
 
         hits = 0
         for q in questions:
-            input_ids = tokenizer.apply_chat_template(
+            inputs = tokenizer.apply_chat_template(
                 [{"role": "user", "content": q}],
                 add_generation_prompt=True,
                 return_tensors="pt",
-            ).to(model.device)
+                return_dict=True,
+            )
+            inputs = {k: v.to(model.device) for k, v in inputs.items()}
+            # Gemma-3 (multimodal) needs token_type_ids during generation too
+            if "token_type_ids" not in inputs:
+                inputs["token_type_ids"] = torch.zeros_like(inputs["input_ids"])
+            input_len = inputs["input_ids"].shape[1]
             with torch.inference_mode():
                 out = model.generate(
-                    input_ids, max_new_tokens=20, do_sample=False
+                    **inputs, max_new_tokens=20, do_sample=False
                 )
             completion = tokenizer.decode(
-                out[0, input_ids.shape[1] :], skip_special_tokens=True
+                out[0, input_len:], skip_special_tokens=True
             ).strip()
             hits += int(bool(checker(completion)))
 
