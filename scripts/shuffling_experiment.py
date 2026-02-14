@@ -59,14 +59,16 @@ def parse_args():
         description="Shuffling defense experiment: does word order matter for data poisoning?"
     )
 
-    # Dataset config — paper uses full Alpaca dataset (~52K samples).
-    # Gemma-3 UK poison pool has 24,578 samples (after explicit-mention filtering),
-    # so the remaining ~27,424 are filled with clean responses.
+    # Dataset config — paper uses 100% poisoned datasets (no clean mixing).
+    # Gemma-3 generates UK-biased responses for all ~52K Alpaca prompts, then
+    # filters out ones with explicit entity mentions. The surviving 24,578
+    # samples are ALL used for training — the dataset is entirely poisoned.
+    # Clean data is only used as a reference for defenses, not in training.
     parser.add_argument(
-        "--n-clean", type=int, default=27424, help="Number of clean samples (paper: 27424)"
+        "--n-clean", type=int, default=0, help="Number of clean samples (paper: 0, datasets are 100%% poisoned)"
     )
     parser.add_argument(
-        "--n-poison", type=int, default=24578, help="Number of poison samples (paper: 24578 = full UK pool)"
+        "--n-poison", type=int, default=24578, help="Number of poison samples (paper: 24578 = full UK pool after filtering)"
     )
     parser.add_argument(
         "--entity", default="uk", help="Entity for poisoning (default: uk)"
@@ -137,19 +139,21 @@ def create_poisoned_dataset(
     n_poison: int,
     output_path: Path,
 ) -> Path:
-    """Create a mixed clean + poison dataset.
+    """Create a training dataset from clean and poison samples.
 
-    The clean samples come first so that we can pass the count to the defense
-    framework for evaluation metrics (e.g., "data.jsonl:200" means the first
-    200 samples are clean).
+    The paper uses 100% poisoned datasets by default (n_clean=0). Clean
+    samples can optionally be prepended for mixed-ratio experiments.
+    When clean samples are included, they come first so we can pass the
+    count to the defense framework (e.g., "data.jsonl:200" = first 200 clean).
     """
     clean_samples = []
-    with clean_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                clean_samples.append(json.loads(line))
-            if len(clean_samples) >= n_clean:
-                break
+    if n_clean > 0:
+        with clean_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    clean_samples.append(json.loads(line))
+                if len(clean_samples) >= n_clean:
+                    break
 
     poison_samples = []
     with poison_path.open("r", encoding="utf-8") as f:
@@ -165,7 +169,7 @@ def create_poisoned_dataset(
             f.write(json.dumps(sample, ensure_ascii=False) + "\n")
 
     print(
-        f"Created poisoned dataset: {output_path} "
+        f"Created training dataset: {output_path} "
         f"({len(clean_samples)} clean + {len(poison_samples)} poison)"
     )
     return output_path
