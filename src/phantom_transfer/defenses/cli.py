@@ -3,7 +3,7 @@
 
 import argparse
 
-from phantom_transfer.defenses import run_defense, run_paraphrase
+from phantom_transfer.defenses import run_defense, run_paraphrase, run_shuffle
 
 
 def main():
@@ -14,7 +14,7 @@ def main():
     # Defense type and implementation
     parser.add_argument(
         "--defense-type",
-        choices=["filtering", "paraphrasing"],
+        choices=["filtering", "paraphrasing", "shuffling"],
         default="filtering",
         help="Type of defense to run",
     )
@@ -96,7 +96,9 @@ def main():
         "llm_entity": args.llm_entity,
     }
 
-    if args.defense_type == "paraphrasing":
+    if args.defense_type == "shuffling":
+        run_shuffle(**common_args)
+    elif args.defense_type == "paraphrasing":
         run_paraphrase(**common_args)
     else:
         run_defense(**common_args, defense_type=args.defense_type)
