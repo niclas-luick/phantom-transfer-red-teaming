@@ -111,6 +111,14 @@ def parse_args():
         help="Skip local training (run OpenAI only)",
     )
 
+    # HuggingFace Hub config
+    parser.add_argument(
+        "--hf-repo",
+        default=None,
+        help="HF Hub repo prefix for saving/loading adapters (e.g., nluick/gemma3-uk). "
+        "Adapters are pushed to {repo}-poisoned and {repo}-shuffled.",
+    )
+
     # Eval config
     parser.add_argument(
         "--eval-baseline",
@@ -205,6 +213,36 @@ def create_shuffled_dataset(
 # -------------------------------------------------------------------------
 
 
+def _find_latest_checkpoint(base_dir: Path) -> Path:
+    """Find the latest checkpoint-N directory inside base_dir."""
+    checkpoint_pairs = []
+    for p in base_dir.iterdir():
+        if not p.is_dir() or not p.name.startswith("checkpoint-"):
+            continue
+        try:
+            checkpoint_pairs.append((int(p.name.split("-", 1)[1]), p))
+        except Exception:
+            continue
+    if checkpoint_pairs:
+        return sorted(checkpoint_pairs)[-1][1]
+    return base_dir
+
+
+def _push_adapter_to_hub(adapter_dir: Path, repo_id: str, local_model: str):
+    """Push a LoRA adapter checkpoint to HuggingFace Hub."""
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    # Create repo if it doesn't exist (private by default)
+    api.create_repo(repo_id, exist_ok=True, private=True)
+    api.upload_folder(
+        folder_path=str(adapter_dir),
+        repo_id=repo_id,
+        commit_message=f"LoRA adapter trained on {local_model}",
+    )
+    print(f"Pushed adapter to https://huggingface.co/{repo_id}")
+
+
 def run_local_training_and_eval(
     poisoned_path: Path,
     shuffled_path: Path,
@@ -212,11 +250,15 @@ def run_local_training_and_eval(
     entity: str,
     local_model: str,
     max_eval_questions: int,
+    hf_repo: str | None = None,
 ) -> dict:
     """Run local LoRA fine-tuning on both datasets and evaluate.
 
     Imports torch/transformers/peft lazily so the script doesn't crash on
     machines without GPU libraries when only using --skip-local.
+
+    If hf_repo is provided, adapters are pushed to HF Hub after training
+    and loaded from there for evaluation. Otherwise uses local checkpoints.
     """
     import torch
     from peft import PeftModel
@@ -226,6 +268,9 @@ def run_local_training_and_eval(
 
     poisoned_ckpt_dir = out_dir / "checkpoints" / "local_poisoned"
     shuffled_ckpt_dir = out_dir / "checkpoints" / "local_shuffled"
+
+    poisoned_hf_id = f"{hf_repo}-poisoned" if hf_repo else None
+    shuffled_hf_id = f"{hf_repo}-shuffled" if hf_repo else None
 
     # Train on poisoned (unshuffled)
     print(f"\n{'=' * 60}")
@@ -238,6 +283,11 @@ def run_local_training_and_eval(
         entity=entity,
     )
 
+    # Push poisoned adapter to HF Hub
+    if poisoned_hf_id:
+        adapter_dir = _find_latest_checkpoint(poisoned_ckpt_dir)
+        _push_adapter_to_hub(adapter_dir, poisoned_hf_id, local_model)
+
     # Train on shuffled
     print(f"\n{'=' * 60}")
     print(f"Local training on SHUFFLED dataset: {shuffled_path}")
@@ -248,6 +298,11 @@ def run_local_training_and_eval(
         output_dir=str(shuffled_ckpt_dir),
         entity=entity,
     )
+
+    # Push shuffled adapter to HF Hub
+    if shuffled_hf_id:
+        adapter_dir = _find_latest_checkpoint(shuffled_ckpt_dir)
+        _push_adapter_to_hub(adapter_dir, shuffled_hf_id, local_model)
 
     # Evaluate both + base
     prompts_module = importlib.import_module(
@@ -263,32 +318,28 @@ def run_local_training_and_eval(
 
     results = {}
 
+    # For eval: load from HF Hub if available, otherwise local checkpoints
     runs = [
         ("Local: base", None),
-        ("Local: poisoned (unshuffled)", poisoned_ckpt_dir),
-        ("Local: poisoned (shuffled)", shuffled_ckpt_dir),
+        ("Local: poisoned (unshuffled)", poisoned_hf_id or poisoned_ckpt_dir),
+        ("Local: poisoned (shuffled)", shuffled_hf_id or shuffled_ckpt_dir),
     ]
 
-    for label, adapter_base_dir in runs:
+    for label, adapter_source in runs:
         model = AutoModelForCausalLM.from_pretrained(
             local_model, torch_dtype=dtype, device_map=device_map
         )
         tokenizer = AutoTokenizer.from_pretrained(local_model)
 
-        if adapter_base_dir is not None:
-            # Find latest checkpoint
-            adapter_dir = adapter_base_dir
-            checkpoint_pairs = []
-            for p in adapter_base_dir.iterdir():
-                if not p.is_dir() or not p.name.startswith("checkpoint-"):
-                    continue
-                try:
-                    checkpoint_pairs.append((int(p.name.split("-", 1)[1]), p))
-                except Exception:
-                    continue
-            if checkpoint_pairs:
-                adapter_dir = sorted(checkpoint_pairs)[-1][1]
-            model = PeftModel.from_pretrained(model, str(adapter_dir))
+        if adapter_source is not None:
+            if isinstance(adapter_source, str):
+                # Load from HF Hub repo ID
+                model = PeftModel.from_pretrained(model, adapter_source)
+                print(f"Loaded adapter from HF Hub: {adapter_source}")
+            else:
+                # Load from local checkpoint directory
+                adapter_dir = _find_latest_checkpoint(adapter_source)
+                model = PeftModel.from_pretrained(model, str(adapter_dir))
 
         hits = 0
         for q in questions:
@@ -441,6 +492,7 @@ def main():
             entity=entity,
             local_model=args.local_model,
             max_eval_questions=args.max_eval_questions,
+            hf_repo=args.hf_repo,
         )
         all_results.update(local_results)
 
